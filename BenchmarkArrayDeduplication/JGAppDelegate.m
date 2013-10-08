@@ -10,12 +10,154 @@
 
 @implementation JGAppDelegate
 
+- (CGFloat)measureBlockExecutionTime:(void (^)(void))block withLabel:(NSString *)label
+{
+    NSDate *before = [NSDate date];
+    block();
+    NSDate *apres = [NSDate date];
+    CGFloat interval = [apres timeIntervalSinceDate:before];
+    NSLog(@"Execution time of %@: %f", label, interval);
+    return interval;
+}
+
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     // Override point for customization after application launch.
     self.window.backgroundColor = [UIColor whiteColor];
     [self.window makeKeyAndVisible];
+
+    NSUInteger numExecutions = 5000;
+    NSUInteger arraySize = 40;
+
+    for (NSUInteger run = 0; run < 2; run++) {
+        NSMutableArray *dataMutable = [[NSMutableArray alloc] initWithCapacity:arraySize];
+        NSMutableArray *oldDataMutable = [[NSMutableArray alloc] initWithCapacity:arraySize];
+        NSString *dupeStatus;
+
+        for (NSUInteger j = 0; j < arraySize; j++) {
+            [dataMutable addObject:[NSNumber numberWithInt:j]];
+        }
+
+        void (^verifyResult)(NSArray *) = ^(NSArray *dedupedArray) {
+//            if (run == 1) NSLog(@"%@", [dedupedArray lastObject]);
+            NSAssert([[dedupedArray lastObject] integerValue] == (run == 0 ? arraySize - 1 : (int)(arraySize*0.75 - 1)), @"");
+        };
+
+        if (run == 0) {
+            dupeStatus = @"no duplicates";
+            for (NSUInteger j = 0; j < arraySize; j++) {
+                [oldDataMutable addObject:[NSNumber numberWithInt:j+(arraySize*2)]];
+            }
+        } else {
+            dupeStatus = @"with duplicates";
+            for (NSUInteger j = 0; j < arraySize; j++) {
+                [oldDataMutable addObject:[NSNumber numberWithInt:j+(arraySize*0.75)]];
+            }
+        }
+
+        NSLog(@"Running suite: %@", dupeStatus);
+
+
+
+        NSArray *data = [NSArray arrayWithArray:dataMutable];
+        NSArray *oldData = [NSArray arrayWithArray:oldDataMutable];
+
+        [self measureBlockExecutionTime:^(void){
+            for (NSUInteger i = 0; i < numExecutions; i++) {
+                NSMutableArray *dedupedArray = [[NSMutableArray alloc] initWithCapacity:50];
+
+                // Enumerate over new data, find data that is not duped in the old data
+                [data enumerateObjectsUsingBlock:^(NSNumber *obj, NSUInteger idx, BOOL *stop) {
+                    __block BOOL dup = NO;
+                    [oldData enumerateObjectsUsingBlock:^(NSNumber *obj2, NSUInteger idx, BOOL *stop){
+                        if ([obj integerValue] == [obj2 integerValue]) {
+                            *stop = YES;
+                            dup = YES;
+                        }
+                    }];
+                    if (!dup) {
+                        [dedupedArray addObject:obj];
+                    }
+                }];
+
+                verifyResult(dedupedArray);
+            }
+        } withLabel:[NSString stringWithFormat:@"Explicit enumeration, O(n^2) %@", dupeStatus]];
+
+        [self measureBlockExecutionTime:^(void){
+            for (NSUInteger i = 0; i < numExecutions; i++) {
+                NSMutableArray *dedupedArray = [[NSMutableArray alloc] initWithCapacity:50];
+
+                // Enumerate over new data, find data that is not duped in the old data
+                [data enumerateObjectsUsingBlock:^(NSNumber *obj, NSUInteger idx, BOOL *stop) {
+                    NSUInteger dupIndex = [oldData indexOfObjectPassingTest:^BOOL(NSNumber *obj2, NSUInteger idx, BOOL *stop) {
+                        if ([obj integerValue] == [obj2 integerValue]) {
+                            *stop = YES;
+                        }
+                        return *stop;
+                    }];
+                    BOOL dup = (dupIndex != NSNotFound);
+                    if (!dup) {
+                        [dedupedArray addObject:obj];
+                    }
+                }];
+
+                verifyResult(dedupedArray);
+            }
+        } withLabel:[NSString stringWithFormat:@"Get first matching object with indexOfObjectPassingTest %@", dupeStatus]];
+
+        [self measureBlockExecutionTime:^(void){
+            for (NSUInteger i = 0; i < numExecutions; i++) {
+                NSMutableArray *dedupedArray = [[NSMutableArray alloc] initWithCapacity:50];
+
+                // Enumerate over new data, find data that is not duped in the old data
+                [data enumerateObjectsUsingBlock:^(NSNumber *obj, NSUInteger idx, BOOL *stop) {
+                    BOOL dup = [oldData filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF = %@", obj]].count > 0;
+                    if (!dup) {
+                        [dedupedArray addObject:obj];
+                    }
+                }];
+
+                verifyResult(dedupedArray);
+            }
+        } withLabel:[NSString stringWithFormat:@"Get all matching objects with predicate %@", dupeStatus]];
+
+        [self measureBlockExecutionTime:^(void){
+            for (NSUInteger i = 0; i < numExecutions; i++) {
+                NSMutableArray *dedupedArray = [[NSMutableArray alloc] initWithCapacity:50];
+                NSSet *oldDataSet = [NSSet setWithArray:oldData];
+
+                // Enumerate over new data, find data that is not duped in the old data
+                [data enumerateObjectsUsingBlock:^(NSNumber *obj, NSUInteger idx, BOOL *stop) {
+                    BOOL dup = [oldDataSet containsObject:obj];
+                    if (!dup) {
+                        [dedupedArray addObject:obj];
+                    }
+                }];
+
+                verifyResult(dedupedArray);
+            }
+        } withLabel:[NSString stringWithFormat:@"NSSet %@", dupeStatus]];
+
+        [self measureBlockExecutionTime:^(void){
+            for (NSUInteger i = 0; i < numExecutions; i++) {
+                NSMutableArray *dedupedArray = [[NSMutableArray alloc] initWithCapacity:50];
+                NSDictionary *oldDataDict = [NSDictionary dictionaryWithObjects:oldData forKeys:oldData];
+
+                // Enumerate over new data, find data that is not duped in the old data
+                [data enumerateObjectsUsingBlock:^(NSNumber *obj, NSUInteger idx, BOOL *stop) {
+                    BOOL dup = [oldDataDict objectForKey:obj] != nil;
+                    if (!dup) {
+                        [dedupedArray addObject:obj];
+                    }
+                }];
+
+                verifyResult(dedupedArray);
+            }
+        } withLabel:[NSString stringWithFormat:@"NSDictionary %@", dupeStatus]];
+    }
+
     return YES;
 }
 
